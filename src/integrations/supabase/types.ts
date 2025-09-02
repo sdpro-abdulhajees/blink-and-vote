@@ -14,7 +14,158 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          details: Json | null
+          id: string
+          ip_address: unknown | null
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          ip_address?: unknown | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          ip_address?: unknown | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      elections: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          end_date: string
+          id: string
+          is_active: boolean | null
+          options: Json
+          start_date: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date: string
+          id?: string
+          is_active?: boolean | null
+          options: Json
+          start_date: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date?: string
+          id?: string
+          is_active?: boolean | null
+          options?: Json
+          start_date?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string
+          face_descriptor: Json | null
+          face_image_url: string | null
+          full_name: string | null
+          id: string
+          is_verified: boolean | null
+          role: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          face_descriptor?: Json | null
+          face_image_url?: string | null
+          full_name?: string | null
+          id?: string
+          is_verified?: boolean | null
+          role?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          face_descriptor?: Json | null
+          face_image_url?: string | null
+          full_name?: string | null
+          id?: string
+          is_verified?: boolean | null
+          role?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      votes: {
+        Row: {
+          blink_verified: boolean | null
+          created_at: string
+          election_id: string
+          face_verified: boolean | null
+          id: string
+          ip_address: unknown | null
+          selected_option: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          blink_verified?: boolean | null
+          created_at?: string
+          election_id: string
+          face_verified?: boolean | null
+          id?: string
+          ip_address?: unknown | null
+          selected_option: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          blink_verified?: boolean | null
+          created_at?: string
+          election_id?: string
+          face_verified?: boolean | null
+          id?: string
+          ip_address?: unknown | null
+          selected_option?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "votes_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
