@@ -68,12 +68,33 @@ const Index = () => {
         return;
       }
 
+      // If no profile exists, create one
+      if (!profile) {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            user_id: userId,
+            email: user?.email || '',
+            full_name: user?.user_metadata?.full_name || 'User'
+          });
+
+        if (insertError) {
+          console.error('Error creating profile:', insertError);
+          toast.error('Failed to create user profile');
+          return;
+        }
+        
+        setAppState('face-registration');
+        setIsLoading(false);
+        return;
+      }
+
       setUserProfile(profile);
       
       // Determine app state based on profile
-      if (!profile) {
-        setAppState('auth');
-      } else if (!profile.face_descriptor || !profile.is_verified) {
+      if (!profile.face_descriptor || !profile.is_verified) {
         setAppState('face-registration');
       } else {
         setAppState('face-verification');

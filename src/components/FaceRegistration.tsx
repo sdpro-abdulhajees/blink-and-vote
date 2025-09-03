@@ -18,7 +18,10 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [faceDescriptor, setFaceDescriptor] = useState<Float32Array | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [allDescriptors, setAllDescriptors] = useState<Float32Array[]>([]);
+  const maxSteps = 3;
 
   useEffect(() => {
     loadModels();
@@ -97,10 +100,13 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
         if (!blob) return;
         
         const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setCapturedImage(imageDataUrl);
+        
+        // Store current image and descriptor
+        setCapturedImages(prev => [...prev, imageDataUrl]);
+        setAllDescriptors(prev => [...prev, detection.descriptor]);
         
         // Upload to Supabase Storage
-        const fileName = `${userId}_face_${Date.now()}.jpg`;
+        const fileName = `${userId}_face_step${currentStep}_${Date.now()}.jpg`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('face-images')
           .upload(`${userId}/${fileName}`, blob, {
@@ -115,45 +121,67 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
           return;
         }
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('face-images')
-          .getPublicUrl(`${userId}/${fileName}`);
-
-        // Get user email for profile
-        const { data: { user } } = await supabase.auth.getUser();
+        toast.success(`Step ${currentStep} captured! 📸`);
         
-        // Save face descriptor and image URL to database
-        const { error: dbError } = await supabase
-          .from('profiles')
-          .upsert({
-            user_id: userId,
-            email: user?.email || '',
-            face_descriptor: Array.from(detection.descriptor),
-            face_image_url: publicUrl,
-            is_verified: true
-          });
-
-        if (dbError) {
-          console.error('Database error:', dbError);
-          toast.error('Failed to save face data');
+        if (currentStep < maxSteps) {
+          // Move to next step
+          setCurrentStep(prev => prev + 1);
           setIsProcessing(false);
-          return;
-        }
+        } else {
+          // All steps completed, save to database
+          const { data: { publicUrl } } = supabase.storage
+            .from('face-images')
+            .getPublicUrl(`${userId}/${fileName}`);
 
-        setFaceDescriptor(detection.descriptor);
-        toast.success('Face registered successfully! 🎉');
-        
-        // Log audit
-        await supabase.from('audit_logs').insert({
-          user_id: userId,
-          action: 'FACE_REGISTERED',
-          details: { success: true }
-        });
-        
-        setIsProcessing(false);
-        stopCamera();
-        onComplete();
+          // Get user email for profile
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          // Average all descriptors for better accuracy
+          const avgDescriptor = new Float32Array(allDescriptors[0].length);
+          for (let i = 0; i < avgDescriptor.length; i++) {
+            let sum = 0;
+            for (const desc of allDescriptors) {
+              sum += desc[i];
+            }
+            avgDescriptor[i] = sum / allDescriptors.length;
+          }
+          
+          // Save face descriptor and image URL to database
+          const { error: dbError } = await supabase
+            .from('profiles')
+            .upsert({
+              user_id: userId,
+              email: user?.email || '',
+              face_descriptor: Array.from(avgDescriptor),
+              face_image_url: publicUrl,
+              is_verified: true
+            });
+
+          if (dbError) {
+            console.error('Database error:', dbError);
+            toast.error('Failed to save face data');
+            setIsProcessing(false);
+            return;
+          }
+
+          setFaceDescriptor(avgDescriptor);
+          toast.success('All face angles captured successfully! 🎉');
+          
+          // Log audit
+          await supabase.from('audit_logs').insert({
+            user_id: userId,
+            action: 'FACE_REGISTERED',
+            details: { 
+              success: true, 
+              steps: maxSteps,
+              avgAccuracy: allDescriptors.length 
+            }
+          });
+          
+          setIsProcessing(false);
+          stopCamera();
+          setTimeout(() => onComplete(), 1500);
+        }
       }, 'image/jpeg', 0.8);
 
     } catch (error) {
@@ -164,7 +192,9 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
   };
 
   const retakePhoto = () => {
-    setCapturedImage(null);
+    setCapturedImages([]);
+    setAllDescriptors([]);
+    setCurrentStep(1);
     setFaceDescriptor(null);
     startCamera();
   };
@@ -190,12 +220,31 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
           Face Registration
         </CardTitle>
         <CardDescription>
-          We need to capture your face to verify your identity for voting
+          We need to capture your face from {maxSteps} different angles for secure voting verification
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Progress indicator */}
+        <div className="flex justify-center items-center gap-2 mb-4">
+          {Array.from({ length: maxSteps }).map((_, index) => (
+            <div
+              key={index}
+              className={`w-3 h-3 rounded-full ${
+                index + 1 < currentStep
+                  ? 'bg-green-500'
+                  : index + 1 === currentStep
+                  ? 'bg-blue-500'
+                  : 'bg-gray-300'
+              }`}
+            />
+          ))}
+          <span className="ml-2 text-sm font-medium">
+            Step {currentStep} of {maxSteps}
+          </span>
+        </div>
+
         <div className="relative">
-          {!capturedImage ? (
+          {currentStep <= maxSteps && capturedImages.length < maxSteps ? (
             <>
               <video
                 ref={videoRef}
@@ -219,29 +268,44 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
               )}
             </>
           ) : (
-            <div className="text-center">
-              <img
-                src={capturedImage}
-                alt="Captured face"
-                className="w-full max-w-md mx-auto rounded-lg border"
-              />
-              <div className="flex items-center justify-center gap-2 mt-4 text-green-600">
+            <div className="text-center space-y-4">
+              {capturedImages.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 max-w-md mx-auto">
+                  {capturedImages.map((image, index) => (
+                    <div key={index} className="relative">
+                      <img
+                        src={image}
+                        alt={`Face angle ${index + 1}`}
+                        className="w-full aspect-square object-cover rounded-lg border-2 border-green-500"
+                      />
+                      <div className="absolute top-1 right-1 bg-green-500 text-white text-xs px-1 py-0.5 rounded">
+                        {index + 1}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center justify-center gap-2 text-green-600">
                 <CheckCircle className="h-5 w-5" />
-                <span>Face captured successfully!</span>
+                <span>
+                  {capturedImages.length === maxSteps 
+                    ? 'All angles captured successfully!' 
+                    : `${capturedImages.length} of ${maxSteps} angles captured`}
+                </span>
               </div>
             </div>
           )}
         </div>
 
         <div className="flex gap-4 justify-center">
-          {!isCameraActive && !capturedImage && (
+          {!isCameraActive && capturedImages.length < maxSteps && (
             <Button onClick={startCamera} size="lg">
               <Camera className="h-4 w-4 mr-2" />
               Start Camera
             </Button>
           )}
           
-          {isCameraActive && !capturedImage && (
+          {isCameraActive && capturedImages.length < maxSteps && (
             <>
               <Button 
                 onClick={captureFace} 
@@ -249,7 +313,7 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
                 size="lg"
                 className="bg-green-600 hover:bg-green-700"
               >
-                {isProcessing ? 'Processing...' : 'Capture Face'}
+                {isProcessing ? 'Processing...' : `Capture Angle ${currentStep}`}
               </Button>
               <Button onClick={stopCamera} variant="outline" size="lg">
                 Cancel
@@ -257,18 +321,34 @@ export const FaceRegistration: React.FC<FaceRegistrationProps> = ({ userId, onCo
             </>
           )}
           
-          {capturedImage && (
+          {capturedImages.length > 0 && (
             <Button onClick={retakePhoto} variant="outline" size="lg">
               <RotateCcw className="h-4 w-4 mr-2" />
-              Retake Photo
+              Start Over
             </Button>
           )}
         </div>
 
         <div className="text-sm text-muted-foreground text-center space-y-2">
+          {currentStep === 1 && (
+            <>
+              <p>📸 Step 1: Look directly at the camera</p>
+              <p>💡 Ensure good lighting and face the camera straight</p>
+            </>
+          )}
+          {currentStep === 2 && (
+            <>
+              <p>↩️ Step 2: Turn your head slightly to the left</p>
+              <p>👀 Keep your eyes visible to the camera</p>
+            </>
+          )}
+          {currentStep === 3 && (
+            <>
+              <p>↪️ Step 3: Turn your head slightly to the right</p>
+              <p>🎯 This is the final angle needed</p>
+            </>
+          )}
           <p>🔒 Your face data is encrypted and stored securely</p>
-          <p>📸 Look directly at the camera for best results</p>
-          <p>💡 Ensure good lighting and remove glasses if possible</p>
         </div>
       </CardContent>
     </Card>
